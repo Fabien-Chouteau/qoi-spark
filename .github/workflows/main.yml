@@ -1,0 +1,21 @@
+
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        os: [macos-latest, windows-latest, ubuntu-latest]
+        gnat_version: [^10, ^11]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v2
+      - uses: alire-project/setup-alire@v1
+        with:
+          toolchain: gprbuild gnat_native${{ matrix.gnat_version }} --disable-assistant
+      - run: alr build
+      - run: cd tests && alr build
