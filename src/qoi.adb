@@ -61,36 +61,82 @@ is
                      Output      : out Storage_Array;
                      Output_Size : out Storage_Count)
    is
-      Max_Chunk_Size : constant Storage_Count := Desc.Channels + 1;
-      Max_Size : constant Storage_Count := Pix'Length * Max_Chunk_Size +
-        QOI_HEADER_SIZE + QOI_PADDING;
+      P   : Storage_Count := Output'First;
+      Run : Run_Range     := 0;
 
-      pragma Assert (Max_Size > Pix'Length);
-
-      P : Storage_Count := Output'First;
+      function Valid_Parameters return Boolean is
+        (Valid_Size (Desc)
+         and then Output'First >= 0
+         and then Output'Last < Storage_Count'Last
+         and then Output'Length >= Encode_Worst_Case (Desc));
 
       procedure Push (D : Unsigned_32)
-        with Post => P = P'Old + 4;
+      with
+        Pre  =>
+          Valid_Parameters
+            and then P in Output'First .. Output'Last - 3
+            and then Output (Output'First .. P - 1)'Initialized,
+        Post =>
+          P = P'Old + 4 and then Output (Output'First .. P - 1)'Initialized;
 
       procedure Push (D : Storage_Element)
-        with Post => P = P'Old + 1;
+      with
+        Pre  =>
+          Valid_Parameters
+            and then P in Output'Range
+            and then Output (Output'First .. P - 1)'Initialized,
+        Post =>
+          P = P'Old + 1 and then Output (Output'First .. P - 1)'Initialized;
+
+      procedure Push_Run
+      with
+        Pre            =>
+          Run /= 0
+            and then Valid_Parameters
+            and then P in Output'First .. Output'Last - (if Run < 33 then 0 else 1)
+            and then Output (Output'First .. P - 1)'Initialized,
+        Post           =>
+          Run = 0 and then Output (Output'First .. P - 1)'Initialized,
+        Contract_Cases =>
+          (Run < 33 => P = P'Old + 1,
+           others   => P = P'Old + 2);
 
       procedure Diff8 (VR, VG, VB : Integer)
-        with Pre => VR in -2 .. 1
-           and then VG in -2 .. 1
-           and then VB in -2 .. 1,
-        Post => P = P'Old + 1;
+      with
+        Pre =>
+          VR in -2 .. 1
+            and then VG in -2 .. 1
+            and then VB in -2 .. 1
+            and then Valid_Parameters
+            and then P in Output'Range
+            and then Output (Output'First .. P - 1)'Initialized,
+        Post =>
+          P = P'Old + 1 and then Output (Output'First .. P - 1)'Initialized;
 
       procedure Diff16 (VR, VG, VB : Integer)
-        with Pre => VR in -16 .. 15
+      with
+        Pre =>
+          VR in -16 .. 15
             and then VG in -8 .. 7
-            and then VB in -8 .. 7,
-        Post => P = P'Old + 2;
+            and then VB in -8 .. 7
+            and then Valid_Parameters
+            and then P in Output'First .. Output'Last - 1
+            and then Output (Output'First .. P - 1)'Initialized,
+        Post =>
+          P = P'Old + 2 and then Output (Output'First .. P - 1)'Initialized;
 
       procedure Diff24 (VR, VG, VB, VA : Integer)
-        with Pre => VR in -16 .. 15 and then VG in -16 .. 15
-           and then VB in -16 .. 15 and then VA in -16 .. 15,
-        Post => P = P'Old + 3;
+      with
+        Pre =>
+          VR in -16 .. 15
+            and then VG in -16 .. 15
+            and then VB in -16 .. 15
+            and then VA in -16 .. 15
+            and then Valid_Parameters
+            and then P in Output'First .. Output'Last - 2
+            and then Output (Output'First .. P - 1)'Initialized,
+        Post =>
+          P = P'Old + 3 and then Output (Output'First .. P - 1)'Initialized;
 
       procedure Push (D : Unsigned_32) is
       begin
@@ -106,8 +152,23 @@ is
       procedure Push  (D : Storage_Element) is
       begin
          Output (P) := D;
+
          P := P + 1;
       end Push;
+
+      procedure Push_Run is
+      begin
+         if Run < 33 then
+            Run := Run - 1;
+            Push (QOI_RUN_8 or Storage_Element (Run));
+         else
+            Run := Run - 33;
+            Push (QOI_RUN_16 or Storage_Element (Shift_Right (Run, 8)));
+            Push (Storage_Element (Run and 16#FF#));
+         end if;
+
+         Run := 0;
+      end Push_Run;
 
       procedure Diff8 (VR, VG, VB : Integer) is
          R : constant Storage_Element := Storage_Element (VR + 2);
@@ -152,31 +213,6 @@ is
          Push (Shift_Left (B, 5) or A);
       end Diff24;
 
-      Run : Run_Range := 0;
-      --  Prev_Run : Run_Range with Ghost;
-
-      procedure Push_Run
-        with
-          Pre => Run /= 0,
-          Post => Run = 0
-          and then (P = P'Old + 1
-                    or else
-                    P = P'Old + 2);
-
-      procedure Push_Run is
-      begin
-         if Run < 33 then
-            Run := Run - 1;
-            Push (QOI_RUN_8 or Storage_Element (Run));
-         else
-            Run := Run - 33;
-            Push (QOI_RUN_16 or Storage_Element (Shift_Right (Run, 8)));
-            Push (Storage_Element (Run and 16#FF#));
-         end if;
-
-         Run := 0;
-      end Push_Run;
-
       Number_Of_Pixels : constant Storage_Count := Pix'Length / Desc.Channels;
 
       subtype Pixel_Index_Range
@@ -217,7 +253,21 @@ is
       Push (Storage_Element (Desc.Channels));
       Push (Storage_Element (Desc.Colorspace'Enum_Rep));
 
+      pragma Assert (P = Output'First + QOI_HEADER_SIZE);
+      pragma Assert (Run = 0);
+      pragma Assert (Output (Output'First .. P - 1)'Initialized);
       for Px_Index in Pixel_Index_Range loop
+
+         pragma Loop_Invariant
+           (Run in 0 .. Run_Range'Last - 1);
+         pragma Loop_Invariant
+           (P - Output'First in
+              0
+                ..
+              QOI_HEADER_SIZE
+              + (Desc.Channels + 1) * (Storage_Count (Px_Index) - Storage_Count (Run)));
+         pragma Loop_Invariant (Output (Output'First .. P - 1)'Initialized);
+
          Px := Read (Px_Index);
 
          if Px = Px_Prev then
@@ -236,6 +286,11 @@ is
             end if;
 
             pragma Assert (Run = 0);
+            pragma Assert
+              (P - Output'First in
+                 0 .. QOI_HEADER_SIZE
+                      + (Desc.Channels + 1)
+                          * Storage_Count (Px_Index));
 
             declare
                Index_Pos : constant Index_Range :=
@@ -302,13 +357,22 @@ is
             end;
          end if;
 
+         pragma Assert (Output (Output'First .. P - 1)'Initialized);
          Px_Prev := Px;
       end loop;
 
-      for Count in 1 .. QOI_PADDING loop
+      pragma Assert (Output (Output'First .. P - 1)'Initialized);
+      pragma Assert (P - Output'First in
+        0 .. QOI_HEADER_SIZE + (Desc.Channels + 1) * Number_Of_Pixels);
+
+      for Count in Storage_Offset range 1 .. QOI_PADDING loop
+         pragma Loop_Invariant
+           (P - Output'First in 0 .. Encode_Worst_Case (Desc) - QOI_PADDING + Count - 1);
+         pragma Loop_Invariant (Output (Output'First .. P - 1)'Initialized);
          Push (Storage_Element (0));
       end loop;
 
+      pragma Assert (Output (Output'First .. P - 1)'Initialized);
       Output_Size := P - Output'First;
    end Encode;
 
@@ -319,6 +383,7 @@ is
    procedure Get_Desc (Data :     Storage_Array;
                        Desc : out QOI_Desc)
    is
+      pragma SPARK_Mode (Off);
       P : Storage_Count := Data'First;
 
       function Pop8 return Storage_Element;
@@ -374,6 +439,7 @@ is
                      Output      : out Storage_Array;
                      Output_Size : out Storage_Count)
    is
+      pragma SPARK_Mode (Off);
       P : Storage_Count;
       Out_Index : Storage_Count := Output'First;
 

@@ -25,17 +25,37 @@ is
    QOI_HEADER_SIZE : constant := 14;
    QOI_PADDING     : constant := 4;
 
+   function Valid_Size (Desc : QOI_Desc) return Boolean is
+     (Desc.Width in 1 .. Storage_Count (Integer_32'Last)
+        and then Desc.Height in 1 .. Storage_Count (Integer_32'Last)
+        and then Desc.Channels in 3 .. 4
+        and then Desc.Width <= Storage_Count'Last / Desc.Height
+        and then Desc.Channels + 1 <= Storage_Count'Last / (Desc.Width * Desc.Height)
+        and then
+          QOI_HEADER_SIZE + QOI_PADDING
+          <= Storage_Count'Last - (Desc.Width * Desc.Height * (Desc.Channels + 1)));
+
    function Encode_Worst_Case (Desc : QOI_Desc) return Storage_Count
    is (Desc.Width * Desc.Height * (Desc.Channels + 1) +
-         QOI_HEADER_SIZE + QOI_PADDING);
+         QOI_HEADER_SIZE + QOI_PADDING)
+   with
+     Pre  => Valid_Size (Desc),
+     Post => Encode_Worst_Case'Result >= QOI_HEADER_SIZE + QOI_PADDING;
 
    procedure Encode (Pix         :     Storage_Array;
                      Desc        :     QOI_Desc;
                      Output      : out Storage_Array;
                      Output_Size : out Storage_Count)
-     with Pre => Desc.Channels in 3 .. 4
-     and then Output'Length >= Encode_Worst_Case (Desc)
-     and then Pix'Length = (Desc.Width * Desc.Height * Desc.Channels);
+   with
+     Relaxed_Initialization => Output,
+     Pre  =>
+       Valid_Size (Desc)
+         and then Output'First >= 0
+         and then Output'Last < Storage_Count'Last
+         and then Output'Length >= Encode_Worst_Case (Desc)
+         and then Pix'First >= 1
+         and then Pix'Length = (Desc.Width * Desc.Height * Desc.Channels),
+     Post => Output (Output'First .. Output'First - 1 + Output_Size)'Initialized;
 
    procedure Get_Desc (Data :     Storage_Array;
                        Desc : out QOI_Desc);
