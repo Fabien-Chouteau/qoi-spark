@@ -383,51 +383,63 @@ is
    procedure Get_Desc (Data :     Storage_Array;
                        Desc : out QOI_Desc)
    is
-      pragma SPARK_Mode (Off);
       P : Storage_Count := Data'First;
 
-      function Pop8 return Storage_Element;
-      function Pop32 return Unsigned_32;
+      procedure Pop8  (Result : out Storage_Element);
+      procedure Pop32 (Result : out Unsigned_32);
 
-      function Pop8 return Storage_Element is
-         Res : Storage_Element;
+      procedure Pop8 (Result : out Storage_Element) is
       begin
-         Res := Data (P);
+         Result := Data (P);
          P := P + 1;
-         return Res;
       end Pop8;
 
-      function Pop32 return Unsigned_32 is
+      procedure Pop32 (Result : out Unsigned_32) is
          A : constant Unsigned_32 := Unsigned_32 (Data (P));
          B : constant Unsigned_32 := Unsigned_32 (Data (P + 1));
          C : constant Unsigned_32 := Unsigned_32 (Data (P + 2));
          D : constant Unsigned_32 := Unsigned_32 (Data (P + 3));
       begin
-         P := P + 4;
-         return Shift_Left (A, 24)
+         Result :=
+           Shift_Left (A, 24)
            or Shift_Left (B, 16)
            or Shift_Left (C, 8)
            or D;
+         P := P + 4;
       end Pop32;
 
-      Magic : Unsigned_32;
+      Magic   : Unsigned_32;
+      Temp_32 : unsigned_32;
+      Temp_8  : Storage_Element;
    begin
       if Data'Length < QOI_HEADER_SIZE then
          Desc := (0, 0, 0, SRGB);
          return;
       end if;
 
-      Magic := Pop32;
+      Pop32 (Magic);
 
       if Magic /= QOI_MAGIC then
          Desc := (0, 0, 0, SRGB);
          return;
       end if;
 
-      Desc.Width := Storage_Count (Pop32);
-      Desc.Height := Storage_Count (Pop32);
-      Desc.Channels := Storage_Count (Pop8);
-      Desc.Colorspace := Colorspace_Kind'Enum_Val (Pop8);
+      Pop32 (Temp_32);
+      Desc.Width := Storage_Count (Temp_32);
+      Pop32 (Temp_32);
+      Desc.Height := Storage_Count (Temp_32);
+      Pop8 (Temp_8);
+      Desc.Channels := Storage_Count (Temp_8);
+      Pop8 (Temp_8);
+      pragma Assert (P = Data'First + QOI_HEADER_SIZE);
+      if Temp_8 not in Storage_Element (Colorspace_Kind'Enum_Rep (SRGB))
+                     | Storage_Element (Colorspace_Kind'Enum_Rep (SRGB_Linear_Alpha))
+                     | Storage_Element (Colorspace_Kind'Enum_Rep (Linear))
+      then
+         Desc := (0, 0, 0, SRGB);
+         return;
+      end if;
+      Desc.Colorspace := Colorspace_Kind'Enum_Val (Temp_8);
    end Get_Desc;
 
    ------------
@@ -439,19 +451,27 @@ is
                      Output      : out Storage_Array;
                      Output_Size : out Storage_Count)
    is
-      pragma SPARK_Mode (Off);
-      P : Storage_Count;
+      P         : Storage_Count;
       Out_Index : Storage_Count := Output'First;
 
-      function Pop8 return Storage_Element;
-      procedure Push (D : Storage_Element);
+      procedure Pop8 (Result : out Storage_Element) with
+        Pre  =>
+          P in Data'Range
+            and then Data'Last < Storage_Count'Last,
+        Post => P = P'Old + 1;
+      procedure Push (D      :     Storage_Element) with
+        Pre  =>
+          Out_Index in Output'Range
+            and then Output'Last < Storage_Count'Last
+            and then Output (Output'First .. Out_Index - 1)'Initialized,
+        Post =>
+          Out_Index = Out_Index'Old + 1
+            and then Output (Output'First .. Out_Index - 1)'Initialized;
 
-      function Pop8 return Storage_Element is
-         Res : Storage_Element;
+      procedure Pop8 (Result : out Storage_Element) is
       begin
-         Res := Data (P);
+         Result := Data (P);
          P := P + 1;
-         return Res;
       end Pop8;
 
       procedure Push (D : Storage_Element) is
@@ -469,6 +489,10 @@ is
          Desc.Height = 0
         or else
          Desc.Channels not in 3 .. 4
+        or else
+         Desc.Height > Storage_Count'Last / Desc.Width
+        or else
+         Desc.Channels > Storage_Count'Last / (Desc.Width * Desc.Height)
         or else
          Output'Length < Desc.Width * Desc.Height * Desc.Channels
       then
@@ -491,10 +515,17 @@ is
          Run : Run_Range := 0;
       begin
          for Px_Index in Pixel_Index_Range loop
+
+            pragma Loop_Invariant (P >= Data'First);
+            pragma Loop_Invariant
+              (Out_Index
+               = Output'First + Desc.Channels * (Px_Index - Pixel_Index_Range'First));
+            pragma Loop_Invariant (Output (Output'First .. Out_Index - 1)'Initialized);
+
             if Run > 0 then
                Run := Run - 1;
             elsif P <= Last_Chunk then
-               B1 := Pop8;
+               Pop8 (B1);
 
                if (B1 and QOI_MASK_2) = QOI_INDEX then
                   Px := Index (Index_Range (B1 and 2#0011_1111#));
@@ -503,7 +534,7 @@ is
                   Run := Run_Range (B1 and 2#0001_1111#);
 
                elsif (B1 and QOI_MASK_3) = QOI_RUN_16 then
-                  B2 := Pop8;
+                  Pop8 (B2);
                   Run := Run_Range (B1 and 2#0001_1111#) * 2 ** 8 +
                     Run_Range (B2) + 32;
 
@@ -513,14 +544,14 @@ is
                   Px.B := Px.B + ((Shift_Right (B1, 0) and 16#03#) - 2);
 
                elsif (B1 and QOI_MASK_3) = QOI_DIFF_16 then
-                  B2 := Pop8;
+                  Pop8 (B2);
                   Px.R := Px.R + ((Shift_Right (B1, 0) and 16#1F#) - 16);
                   Px.G := Px.G + ((Shift_Right (B2, 4) and 16#0F#) - 8);
                   Px.B := Px.B + ((Shift_Right (B2, 0) and 16#0F#) - 8);
 
                elsif (B1 and QOI_MASK_4) = QOI_DIFF_24 then
-                  B2 := Pop8;
-                  B3 := Pop8;
+                  Pop8 (B2);
+                  Pop8 (B3);
 
                   pragma Style_Checks ("M110");
                   Px.R := Px.R + ((Shift_Left (B1 and 16#0F#, 1) or Shift_Right (B2, 7))  - 16);
@@ -531,16 +562,16 @@ is
                elsif (B1 and QOI_MASK_4) = QOI_COLOR then
 
                   if (B1 and 8) /= 0 then
-                     Px.R := Pop8;
+                     Pop8 (Px.R);
                   end if;
                   if (B1 and 4) /= 0 then
-                     Px.G := Pop8;
+                     Pop8 (Px.G);
                   end if;
                   if (B1 and 2) /= 0 then
-                     Px.B := Pop8;
+                     Pop8 (Px.B);
                   end if;
                   if (B1 and 1) /= 0 then
-                     Px.A := Pop8;
+                     Pop8 (Px.A);
                   end if;
                end if;
 

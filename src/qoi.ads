@@ -58,12 +58,34 @@ is
      Post => Output (Output'First .. Output'First - 1 + Output_Size)'Initialized;
 
    procedure Get_Desc (Data :     Storage_Array;
-                       Desc : out QOI_Desc);
+                       Desc : out QOI_Desc)
+   with
+     Pre =>
+       Data'First >= 0
+         and then Data'Last < Storage_Count'Last;
 
    procedure Decode (Data        :     Storage_Array;
                      Desc        : out QOI_Desc;
                      Output      : out Storage_Array;
-                     Output_Size : out Storage_Count);
+                     Output_Size : out Storage_Count)
+   with
+     Relaxed_Initialization => Output,
+     Pre  =>
+       Output'First >= 0
+         and then Output'Last < Storage_Count'Last
+         and then Data'First >= 0
+         and then Data'Last < Storage_Count'Last
+         and then Data'Length >= QOI_HEADER_SIZE + QOI_PADDING,
+     Post =>
+       (if Output_Size /= 0
+        then
+          Desc.Height <= Storage_Count'Last / Desc.Width
+            and then
+          Desc.Channels <= Storage_Count'Last / (Desc.Width * Desc.Height)
+            and then
+          Output_Size = Desc.Width * Desc.Height * Desc.Channels
+            and then
+          Output (Output'First .. Output'First - 1 + Output_Size)'Initialized);
 
 private
 
