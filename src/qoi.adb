@@ -68,7 +68,8 @@ is
         (Valid_Size (Desc)
          and then Output'First >= 0
          and then Output'Last < Storage_Count'Last
-         and then Output'Length >= Encode_Worst_Case (Desc));
+         and then Output'Length >= Encode_Worst_Case (Desc))
+      with Ghost;
 
       procedure Push (D : Unsigned_32)
       with
