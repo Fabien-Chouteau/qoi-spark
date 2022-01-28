@@ -14,7 +14,7 @@ is
      with Default_Component_Value => 0;
    type Data_Access is access Data;
 
-   type Colorspace_Kind is (SRGB, SRGB_Linear_Alpha, Linear);
+   type Colorspace_Kind is (SRGB, SRGB_Linear_Alpha);
 
    type QOI_Desc is record
       Width, Height : Storage_Count;
@@ -23,7 +23,8 @@ is
    end record;
 
    QOI_HEADER_SIZE : constant := 14;
-   QOI_PADDING     : constant := 4;
+   QOI_PADDING : constant Storage_Array (1 .. 8)
+     := (0, 0, 0, 0, 0, 0, 0, 1);
 
    function Valid_Size (Desc : QOI_Desc) return Boolean is
      (Desc.Width in 1 .. Storage_Count (Integer_32'Last)
@@ -32,15 +33,15 @@ is
         and then Desc.Width <= Storage_Count'Last / Desc.Height
         and then Desc.Channels + 1 <= Storage_Count'Last / (Desc.Width * Desc.Height)
         and then
-          QOI_HEADER_SIZE + QOI_PADDING
+          QOI_HEADER_SIZE + QOI_PADDING'Length
           <= Storage_Count'Last - (Desc.Width * Desc.Height * (Desc.Channels + 1)));
 
    function Encode_Worst_Case (Desc : QOI_Desc) return Storage_Count
    is (Desc.Width * Desc.Height * (Desc.Channels + 1) +
-         QOI_HEADER_SIZE + QOI_PADDING)
+         QOI_HEADER_SIZE + QOI_PADDING'Length)
    with
      Pre  => Valid_Size (Desc),
-     Post => Encode_Worst_Case'Result >= QOI_HEADER_SIZE + QOI_PADDING;
+     Post => Encode_Worst_Case'Result >= QOI_HEADER_SIZE + QOI_PADDING'Length;
 
    procedure Encode (Pix         :     Storage_Array;
                      Desc        :     QOI_Desc;
@@ -75,7 +76,7 @@ is
          and then Output'Last < Storage_Count'Last
          and then Data'First >= 0
          and then Data'Last < Storage_Count'Last
-         and then Data'Length >= QOI_HEADER_SIZE + QOI_PADDING,
+         and then Data'Length >= QOI_HEADER_SIZE + QOI_PADDING'Length,
      Post =>
        (if Output_Size /= 0
         then
@@ -91,6 +92,71 @@ private
 
    for Colorspace_Kind'Size use 8;
    for Colorspace_Kind use (SRGB              => 16#00#,
-                            SRGB_Linear_Alpha => 16#01#,
-                            Linear            => 16#0f#);
+                            SRGB_Linear_Alpha => 16#01#);
+
+   type Tag_Op is mod 2 ** 2 with Size => 2;
+
+   QOI_OP_INDEX   : constant Tag_Op := 2#00#;
+   QOI_OP_DIFF    : constant Tag_Op := 2#01#;
+   QOI_OP_LUMA    : constant Tag_Op := 2#10#;
+   QOI_OP_RUN     : constant Tag_Op := 2#11#;
+   QOI_OP_RGB     : constant Storage_Element := 2#11111110#;
+   QOI_OP_RGBA    : constant Storage_Element := 2#11111111#;
+
+   QOI_MAGIC : constant Unsigned_32 :=
+     (113 * 2 ** 24) + (111 * 2 ** 16) + (105 * 2 ** 8) + 102;
+
+   type Uint2 is mod 2**2 with Size => 2;
+   type Uint4 is mod 2**4 with Size => 4;
+   type Uint6 is mod 2**6 with Size => 6;
+
+   type Index_Tag is record
+      Index : Uint6;
+      Op    : Tag_Op;
+   end record with Size => 8, Object_Size => 8;
+   for Index_Tag use record
+      Index at 0 range 0 .. 5;
+      Op    at 0 range 6 .. 7;
+   end record;
+
+   type Diff_Tag is record
+      DB : Uint2;
+      DG : Uint2;
+      DR : Uint2;
+      Op : Tag_Op;
+   end record with Size => 8, Object_Size => 8;
+   for Diff_Tag use record
+      DB at 0 range 0 .. 1;
+      DG at 0 range 2 .. 3;
+      DR at 0 range 4 .. 5;
+      Op at 0 range 6 .. 7;
+   end record;
+
+   type LUMA_Tag_A is record
+      DG : Uint6;
+      Op : Tag_Op;
+   end record with Size => 8, Object_Size => 8;
+   for LUMA_Tag_A use record
+      DG at 0 range 0 .. 5;
+      Op at 0 range 6 .. 7;
+   end record;
+
+   type LUMA_Tag_B is record
+      DG_B : Uint4;
+      DG_R : Uint4;
+   end record with Size => 8, Object_Size => 8;
+   for LUMA_Tag_B use record
+      DG_B at 0 range 0 .. 3;
+      DG_R at 0 range 4 .. 7;
+   end record;
+
+   type Run_Tag is record
+      Run : Uint6;
+      Op  : Tag_Op;
+   end record with Size => 8, Object_Size => 8;
+   for Run_Tag use record
+      Run at 0 range 0 .. 5;
+      Op at 0 range 6 .. 7;
+   end record;
+
 end QOI;

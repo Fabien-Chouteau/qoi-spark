@@ -1,3 +1,5 @@
+with Ada.Unchecked_Conversion;
+
 package body QOI
 with SPARK_Mode
 is
@@ -5,51 +7,33 @@ is
    pragma Compile_Time_Error (Storage_Element'Size /= 8,
                               "Invalid element size");
 
-   function Shift_Left
-     (Value  : Storage_Element;
-      Amount : Natural) return Storage_Element
-     with
-       Import,
-       Convention => Intrinsic;
-   function Shift_Right
-     (Value  : Storage_Element;
-      Amount : Natural) return Storage_Element
-     with
-       Import,
-       Convention => Intrinsic;
+   pragma Warnings (Off, "lower bound test optimized away");
 
-   QOI_INDEX   : constant Storage_Element := 16#00#; -- 00xxxxxx
-   QOI_RUN_8   : constant Storage_Element := 16#40#; -- 010xxxxx
-   QOI_RUN_16  : constant Storage_Element := 16#60#; -- 011xxxxx
-   QOI_DIFF_8  : constant Storage_Element := 16#80#; -- 10xxxxxx
-   QOI_DIFF_16 : constant Storage_Element := 16#c0#; -- 110xxxxx
-   QOI_DIFF_24 : constant Storage_Element := 16#e0#; -- 1110xxxx
-   QOI_COLOR   : constant Storage_Element := 16#f0#; -- 1111xxxx
+   subtype SE is Storage_Element;
 
-   QOI_MASK_2 : constant Storage_Element := 16#c0#; -- 11000000
-   QOI_MASK_3 : constant Storage_Element := 16#e0#; -- 11100000
-   QOI_MASK_4 : constant Storage_Element := 16#f0#; -- 11110000
-
-   QOI_MAGIC : constant Unsigned_32 :=
-     (113 * 2 ** 24) + (111 * 2 ** 16) + (105 * 2 ** 8) + 102;
+   function As_Index is new Ada.Unchecked_Conversion (SE, Index_Tag);
+   function As_Diff is new Ada.Unchecked_Conversion (SE, Diff_Tag);
+   function As_LUMA_A is new Ada.Unchecked_Conversion (SE, LUMA_Tag_A);
+   function As_LUMA_B is new Ada.Unchecked_Conversion (SE, LUMA_Tag_B);
+   function As_Run is new Ada.Unchecked_Conversion (SE, Run_Tag);
 
    type Color is record
-      R, G, B, A : Storage_Element;
+      R, G, B, A : SE;
    end record
      with Size => 32;
 
    type Index_Range is range 0 .. 63;
-   subtype Run_Range is Unsigned_32 range 0 .. 8224;
+   subtype Run_Range is Unsigned_32 range 0 .. 62;
 
-   function Hash (C : Color) return Storage_Element;
+   function Hash (C : Color) return SE;
 
    ----------
    -- Hash --
    ----------
 
-   function Hash (C : Color) return Storage_Element is
+   function Hash (C : Color) return SE is
    begin
-      return C.R xor C.G xor C.B xor C.A;
+      return C.R * 3 + C.G * 5 + C.B * 7 + C.A * 11;
    end Hash;
 
    ------------
@@ -80,141 +64,44 @@ is
         Post =>
           P = P'Old + 4 and then Output (Output'First .. P - 1)'Initialized;
 
-      procedure Push (D : Storage_Element)
+      generic
+         type T is private;
+      procedure Gen_Push_8 (D : T)
       with
         Pre  =>
-          Valid_Parameters
+            Valid_Parameters
+            and then T'Size = 8
             and then P in Output'Range
             and then Output (Output'First .. P - 1)'Initialized,
         Post =>
           P = P'Old + 1 and then Output (Output'First .. P - 1)'Initialized;
-
-      procedure Push_Run
-      with
-        Pre            =>
-          Run /= 0
-            and then Valid_Parameters
-            and then P in Output'First .. Output'Last - (if Run < 33 then 0 else 1)
-            and then Output (Output'First .. P - 1)'Initialized,
-        Post           =>
-          Run = 0 and then Output (Output'First .. P - 1)'Initialized,
-        Contract_Cases =>
-          (Run < 33 => P = P'Old + 1,
-           others   => P = P'Old + 2);
-
-      procedure Diff8 (VR, VG, VB : Integer)
-      with
-        Pre =>
-          VR in -2 .. 1
-            and then VG in -2 .. 1
-            and then VB in -2 .. 1
-            and then Valid_Parameters
-            and then P in Output'Range
-            and then Output (Output'First .. P - 1)'Initialized,
-        Post =>
-          P = P'Old + 1 and then Output (Output'First .. P - 1)'Initialized;
-
-      procedure Diff16 (VR, VG, VB : Integer)
-      with
-        Pre =>
-          VR in -16 .. 15
-            and then VG in -8 .. 7
-            and then VB in -8 .. 7
-            and then Valid_Parameters
-            and then P in Output'First .. Output'Last - 1
-            and then Output (Output'First .. P - 1)'Initialized,
-        Post =>
-          P = P'Old + 2 and then Output (Output'First .. P - 1)'Initialized;
-
-      procedure Diff24 (VR, VG, VB, VA : Integer)
-      with
-        Pre =>
-          VR in -16 .. 15
-            and then VG in -16 .. 15
-            and then VB in -16 .. 15
-            and then VA in -16 .. 15
-            and then Valid_Parameters
-            and then P in Output'First .. Output'Last - 2
-            and then Output (Output'First .. P - 1)'Initialized,
-        Post =>
-          P = P'Old + 3 and then Output (Output'First .. P - 1)'Initialized;
 
       procedure Push (D : Unsigned_32) is
       begin
-         pragma Style_Checks ("M100");
-         Output (P)     := Storage_Element (Shift_Right (D and 16#FF_00_00_00#, 24));
-         Output (P + 1) := Storage_Element (Shift_Right (D and 16#00_FF_00_00#, 16));
-         Output (P + 2) := Storage_Element (Shift_Right (D and 16#00_00_FF_00#, 8));
-         Output (P + 3) := Storage_Element (Shift_Right (D and 16#00_00_00_FF#, 0));
+         Output (P)     := SE (Shift_Right (D and 16#FF_00_00_00#, 24));
+         Output (P + 1) := SE (Shift_Right (D and 16#00_FF_00_00#, 16));
+         Output (P + 2) := SE (Shift_Right (D and 16#00_00_FF_00#, 8));
+         Output (P + 3) := SE (Shift_Right (D and 16#00_00_00_FF#, 0));
 
          P := P + 4;
       end Push;
 
-      procedure Push  (D : Storage_Element) is
+      procedure Gen_Push_8  (D : T) is
+         function To_Byte is new Ada.Unchecked_Conversion (T, SE);
       begin
-         Output (P) := D;
+         Output (P) := To_Byte (D);
 
          P := P + 1;
-      end Push;
+      end Gen_Push_8;
 
-      procedure Push_Run is
-      begin
-         if Run < 33 then
-            Run := Run - 1;
-            Push (QOI_RUN_8 or Storage_Element (Run));
-         else
-            Run := Run - 33;
-            Push (QOI_RUN_16 or Storage_Element (Shift_Right (Run, 8)));
-            Push (Storage_Element (Run and 16#FF#));
-         end if;
+      procedure Push is new Gen_Push_8 (SE);
+      procedure Push_Run is new Gen_Push_8 (Run_Tag);
+      procedure Push_Index is new Gen_Push_8 (Index_Tag);
+      procedure Push_Diff is new Gen_Push_8 (Diff_Tag);
+      procedure Push_Luma_A is new Gen_Push_8 (LUMA_Tag_A);
+      procedure Push_Luma_B is new Gen_Push_8 (LUMA_Tag_B);
 
-         Run := 0;
-      end Push_Run;
-
-      procedure Diff8 (VR, VG, VB : Integer) is
-         R : constant Storage_Element := Storage_Element (VR + 2);
-         G : constant Storage_Element := Storage_Element (VG + 2);
-         B : constant Storage_Element := Storage_Element (VB + 2);
-      begin
-         Push (QOI_DIFF_8
-                or
-                  Shift_Left (R, 4)
-                or
-                  Shift_Left (G, 2)
-                or
-                  Shift_Left (B, 0)
-               );
-      end Diff8;
-
-      procedure Diff16 (VR, VG, VB : Integer) is
-         R : constant Storage_Element := Storage_Element (VR + 16);
-         G : constant Storage_Element := Storage_Element (VG + 8);
-         B : constant Storage_Element := Storage_Element (VB + 8);
-      begin
-         Push (QOI_DIFF_16 or R);
-         Push (Shift_Left (G, 4)
-                or
-                Shift_Left (B, 0));
-      end Diff16;
-
-      procedure Diff24 (VR, VG, VB, VA : Integer) is
-         R : constant Storage_Element := Storage_Element (VR + 16);
-         G : constant Storage_Element := Storage_Element (VG + 16);
-         B : constant Storage_Element := Storage_Element (VB + 16);
-         A : constant Storage_Element := Storage_Element (VA + 16);
-      begin
-         Push (QOI_DIFF_24 or Shift_Right (R, 1));
-
-         Push (Shift_Left (R, 7)
-                or
-                Shift_Left (G, 2)
-                or
-                Shift_Right (B, 3));
-
-         Push (Shift_Left (B, 5) or A);
-      end Diff24;
-
-      Number_Of_Pixels : constant Storage_Count := Pix'Length / Desc.Channels;
+      Number_Of_Pixels : constant Storage_Count := Desc.Width * Desc.Height;
 
       subtype Pixel_Index_Range
         is Storage_Count range 0 .. Number_Of_Pixels - 1;
@@ -251,8 +138,8 @@ is
       Push (QOI_MAGIC);
       Push (Unsigned_32 (Desc.Width));
       Push (Unsigned_32 (Desc.Height));
-      Push (Storage_Element (Desc.Channels));
-      Push (Storage_Element (Desc.Colorspace'Enum_Rep));
+      Push (SE (Desc.Channels));
+      Push (SE (Desc.Colorspace'Enum_Rep));
 
       pragma Assert (P = Output'First + QOI_HEADER_SIZE);
       pragma Assert (Run = 0);
@@ -273,17 +160,18 @@ is
 
          if Px = Px_Prev then
             Run := Run + 1;
-            if Run = Run_Range'Last
-              or else
-               Px_Index = Pixel_Index_Range'Last
+
+            if Run = Run_Range'Last or else Px_Index = Pixel_Index_Range'Last
             then
-               Push_Run;
+               Push_Run ((Op => QOI_OP_RUN, Run => Uint6 (Run - 1)));
+               Run := 0;
             end if;
 
          else
 
             if Run > 0 then
-               Push_Run;
+               Push_Run ((Op => QOI_OP_RUN, Run => Uint6 (Run - 1)));
+               Run := 0;
             end if;
 
             pragma Assert (Run = 0);
@@ -298,62 +186,55 @@ is
                  Index_Range (Hash (Px) mod Index'Length);
             begin
                if Index (Index_Pos) = Px then
-                  Push (QOI_INDEX or Storage_Element (Index_Pos));
+                  Push_Index ((Op    => QOI_OP_INDEX,
+                               Index => Uint6 (Index_Pos)));
                else
                   Index (Index_Pos) := Px;
 
-                  declare
-                     VR : constant Integer :=
-                       Integer (Px.R) - Integer (Px_Prev.R);
-                     VG : constant Integer :=
-                       Integer (Px.G) - Integer (Px_Prev.G);
-                     VB : constant Integer :=
-                       Integer (Px.B) - Integer (Px_Prev.B);
-                     VA : constant Integer :=
-                       Integer (Px.A) - Integer (Px_Prev.A);
-                  begin
-                     if         VR in -16 .. 15
-                       and then VG in -16 .. 15
-                       and then VB in -16 .. 15
-                       and then VA in -16 .. 15
-                     then
-                        if         VA = 0
-                          and then VR in -2 .. 1
+                  if Px.A = Px_Prev.A then
+                     declare
+                        VR : constant Integer :=
+                          Integer (Px.R) - Integer (Px_Prev.R);
+                        VG : constant Integer :=
+                          Integer (Px.G) - Integer (Px_Prev.G);
+                        VB : constant Integer :=
+                          Integer (Px.B) - Integer (Px_Prev.B);
+
+                        VG_R : constant Integer := VR - VG;
+                        VG_B : constant Integer := VB - VG;
+                     begin
+                        if         VR in -2 .. 1
                           and then VG in -2 .. 1
                           and then VB in -2 .. 1
                         then
-                           Diff8 (VR, VG, VB);
+                           Push_Diff ((Op  => QOI_OP_DIFF,
+                                       DR  => Uint2 (VR + 2),
+                                       DG  => Uint2 (VG + 2),
+                                       DB  => Uint2 (VB + 2)));
 
-                        elsif      VA = 0
-                          and then VR in -16 .. 15
-                          and then VG in -8 .. 7
-                          and then VB in -8 .. 7
+                        elsif      VG_R in -8 .. 7
+                          and then VG   in -32 .. 31
+                          and then VG_B in -8 .. 7
                         then
-                           Diff16 (VR, VG, VB);
-                        else
-                           Diff24 (VR, VG, VB, VA);
-                        end if;
-                     else
-                        Push (QOI_COLOR
-                               or (if VR /= 0 then 8 else 0)
-                               or (if VG /= 0 then 4 else 0)
-                               or (if VB /= 0 then 2 else 0)
-                               or (if VA /= 0 then 1 else 0));
+                           Push_Luma_A ((Op  => QOI_OP_LUMA,
+                                         DG  => Uint6 (VG + 32)));
+                           Push_Luma_B ((DG_R => Uint4 (VG_R + 8),
+                                         DG_B => Uint4 (VG_B + 8)));
 
-                        if VR /= 0 then
+                        else
+                           Push (QOI_OP_RGB);
                            Push (Px.R);
-                        end if;
-                        if VG /= 0 then
                            Push (Px.G);
-                        end if;
-                        if VB /= 0 then
                            Push (Px.B);
                         end if;
-                        if Desc.Channels = 4 and then VA /= 0 then
-                           Push (Px.A);
-                        end if;
-                     end if;
-                  end;
+                     end;
+                  else
+                     Push (QOI_OP_RGBA);
+                     Push (Px.R);
+                     Push (Px.G);
+                     Push (Px.B);
+                     Push (Px.A);
+                  end if;
                end if;
             end;
          end if;
@@ -366,11 +247,11 @@ is
       pragma Assert (P - Output'First in
         0 .. QOI_HEADER_SIZE + (Desc.Channels + 1) * Number_Of_Pixels);
 
-      for Count in Storage_Offset range 1 .. QOI_PADDING loop
+      for Count in QOI_PADDING'Range loop
          pragma Loop_Invariant
-           (P - Output'First in 0 .. Encode_Worst_Case (Desc) - QOI_PADDING + Count - 1);
+           (P - Output'First in 0 .. Encode_Worst_Case (Desc) - QOI_PADDING'Length + Count - 1);
          pragma Loop_Invariant (Output (Output'First .. P - 1)'Initialized);
-         Push (Storage_Element (0));
+         Push (QOI_PADDING (Count));
       end loop;
 
       pragma Assert (Output (Output'First .. P - 1)'Initialized);
@@ -386,10 +267,10 @@ is
    is
       P : Storage_Count := Data'First;
 
-      procedure Pop8  (Result : out Storage_Element);
+      procedure Pop8  (Result : out SE);
       procedure Pop32 (Result : out Unsigned_32);
 
-      procedure Pop8 (Result : out Storage_Element) is
+      procedure Pop8 (Result : out SE) is
       begin
          Result := Data (P);
          P := P + 1;
@@ -411,7 +292,7 @@ is
 
       Magic   : Unsigned_32;
       Temp_32 : unsigned_32;
-      Temp_8  : Storage_Element;
+      Temp_8  : SE;
    begin
       if Data'Length < QOI_HEADER_SIZE then
          Desc := (0, 0, 0, SRGB);
@@ -433,9 +314,8 @@ is
       Desc.Channels := Storage_Count (Temp_8);
       Pop8 (Temp_8);
       pragma Assert (P = Data'First + QOI_HEADER_SIZE);
-      if Temp_8 not in Storage_Element (Colorspace_Kind'Enum_Rep (SRGB))
-                     | Storage_Element (Colorspace_Kind'Enum_Rep (SRGB_Linear_Alpha))
-                     | Storage_Element (Colorspace_Kind'Enum_Rep (Linear))
+      if Temp_8 not in SE (Colorspace_Kind'Enum_Rep (SRGB))
+                     | SE (Colorspace_Kind'Enum_Rep (SRGB_Linear_Alpha))
       then
          Desc := (0, 0, 0, SRGB);
          return;
@@ -455,12 +335,12 @@ is
       P         : Storage_Count;
       Out_Index : Storage_Count := Output'First;
 
-      procedure Pop8 (Result : out Storage_Element) with
+      procedure Pop (Result : out SE) with
         Pre  =>
           P in Data'Range
             and then Data'Last < Storage_Count'Last,
         Post => P = P'Old + 1;
-      procedure Push (D      :     Storage_Element) with
+      procedure Push (D      :     SE) with
         Pre  =>
           Out_Index in Output'Range
             and then Output'Last < Storage_Count'Last
@@ -469,13 +349,13 @@ is
           Out_Index = Out_Index'Old + 1
             and then Output (Output'First .. Out_Index - 1)'Initialized;
 
-      procedure Pop8 (Result : out Storage_Element) is
+      procedure Pop (Result : out SE) is
       begin
          Result := Data (P);
          P := P + 1;
-      end Pop8;
+      end Pop;
 
-      procedure Push (D : Storage_Element) is
+      procedure Push (D : SE) is
       begin
          Output (Out_Index) := D;
          Out_Index := Out_Index + 1;
@@ -508,11 +388,12 @@ is
          subtype Pixel_Index_Range
            is Storage_Count range 0 .. Number_Of_Pixels - 1;
 
-         Last_Chunk : constant Storage_Count := Data'Last - QOI_PADDING;
+         Last_Chunk : constant Storage_Count := Data'Last - QOI_PADDING'Length;
 
          Index   : array (Index_Range) of Color := (others => ((0, 0, 0, 0)));
          Px      : Color := (R => 0, G => 0, B => 0, A => 255);
-         B1, B2, B3 : Storage_Element;
+         B1, B2  : SE;
+         VG      : SE;
          Run : Run_Range := 0;
       begin
          for Px_Index in Pixel_Index_Range loop
@@ -526,54 +407,42 @@ is
             if Run > 0 then
                Run := Run - 1;
             elsif P <= Last_Chunk then
-               Pop8 (B1);
+               Pop (B1);
 
-               if (B1 and QOI_MASK_2) = QOI_INDEX then
-                  Px := Index (Index_Range (B1 and 2#0011_1111#));
+               if B1 = QOI_OP_RGB then
+                  Pop (Px.R);
+                  Pop (Px.G);
+                  Pop (Px.B);
 
-               elsif (B1 and QOI_MASK_3) = QOI_RUN_8 then
-                  Run := Run_Range (B1 and 2#0001_1111#);
+               elsif B1 = QOI_OP_RGBA then
+                  Pop (Px.R);
+                  Pop (Px.G);
+                  Pop (Px.B);
+                  Pop (Px.A);
 
-               elsif (B1 and QOI_MASK_3) = QOI_RUN_16 then
-                  Pop8 (B2);
-                  Run := Run_Range (B1 and 2#0001_1111#) * 2 ** 8 +
-                    Run_Range (B2) + 32;
+               else
+                  case As_Run (B1).Op is
 
-               elsif (B1 and QOI_MASK_2) = QOI_DIFF_8 then
-                  Px.R := Px.R + ((Shift_Right (B1, 4) and 16#03#) - 2);
-                  Px.G := Px.G + ((Shift_Right (B1, 2) and 16#03#) - 2);
-                  Px.B := Px.B + ((Shift_Right (B1, 0) and 16#03#) - 2);
+                  when QOI_OP_INDEX =>
+                     Px := Index (Index_Range (As_Index (B1).Index));
 
-               elsif (B1 and QOI_MASK_3) = QOI_DIFF_16 then
-                  Pop8 (B2);
-                  Px.R := Px.R + ((Shift_Right (B1, 0) and 16#1F#) - 16);
-                  Px.G := Px.G + ((Shift_Right (B2, 4) and 16#0F#) - 8);
-                  Px.B := Px.B + ((Shift_Right (B2, 0) and 16#0F#) - 8);
+                  when QOI_OP_DIFF =>
+                     Px.R := Px.R + SE (As_Diff (B1).DR) - 2;
+                     Px.G := Px.G + SE (As_Diff (B1).DG) - 2;
+                     Px.B := Px.B + SE (As_Diff (B1).DB) - 2;
 
-               elsif (B1 and QOI_MASK_4) = QOI_DIFF_24 then
-                  Pop8 (B2);
-                  Pop8 (B3);
+                  when QOI_OP_LUMA =>
+                     Pop (B2);
+                     VG := SE (As_LUMA_A (B1).DG) - 32;
 
-                  pragma Style_Checks ("M110");
-                  Px.R := Px.R + ((Shift_Left (B1 and 16#0F#, 1) or Shift_Right (B2, 7))  - 16);
-                  Px.G := Px.G + (Shift_Right (B2 and 16#7C#, 2) - 16);
-                  Px.B := Px.B + ((Shift_Left (B2 and 16#03#, 3) or Shift_Right (B3 and 16#E0#, 5)) - 16);
-                  Px.A := Px.A + ((Shift_Right (B3, 0) and 16#1F#) - 16);
+                     PX.R := PX.R + VG + SE (As_LUMA_B (B2).DG_R) - 8;
+                     PX.G := PX.G + VG;
+                     PX.B := PX.B + VG + SE (As_LUMA_B (B2).DG_B) - 8;
 
-               elsif (B1 and QOI_MASK_4) = QOI_COLOR then
+                  when QOI_OP_RUN =>
+                     Run := Run_Range (As_Run (B1).Run mod 63);
 
-                  if (B1 and 8) /= 0 then
-                     Pop8 (Px.R);
-                  end if;
-                  if (B1 and 4) /= 0 then
-                     Pop8 (Px.G);
-                  end if;
-                  if (B1 and 2) /= 0 then
-                     Pop8 (Px.B);
-                  end if;
-                  if (B1 and 1) /= 0 then
-                     Pop8 (Px.A);
-                  end if;
+                  end case;
                end if;
 
                Index (Index_Range (Hash (Px) mod Index'Length)) := Px;

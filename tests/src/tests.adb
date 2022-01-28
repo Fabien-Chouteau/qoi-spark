@@ -12,6 +12,8 @@ with GNAT.OS_Lib;
 
 with QOI; use QOI;
 
+with Reference_QOI;
+
 with AAA.Strings;
 
 procedure Tests is
@@ -147,6 +149,18 @@ procedure Tests is
                         Output_Size => Output_Size);
 
             Result.Data := Out_Data;
+
+            if Reference_QOI.Check_Decode
+              (In_Data.all,
+               Result.Desc,
+               Out_Data.all (Out_Data'First .. Out_Data'First + Output_Size - 1))
+            then
+               Put_Line ("Compare with reference decoder: OK");
+            else
+               Put_Line ("Compare with reference decoder: FAIL");
+               GNAT.OS_Lib.OS_Exit (1);
+            end if;
+
             return Result;
          end;
       end;
@@ -205,10 +219,23 @@ begin
                      Output_Size);
 
          if Output_Size /= 0 then
-            Put_Line ("Encode OK");
+            Put_Line ("Encode: OK");
+
+            if Reference_QOI.Check_Encode
+              (Input.Data.all,
+               Input.Desc,
+               Output (Output'First .. Output'First + Output_Size - 1))
+            then
+               Put_Line ("Compare with reference encoder: OK");
+            else
+               Put_Line ("Compare with reference encoder: FAIL");
+               GNAT.OS_Lib.OS_Exit (1);
+            end if;
+
             Write_To_File (Ada.Command_Line.Argument (2), Output, Output_Size);
          else
             Ada.Text_IO.Put_Line ("Encode failed");
+            GNAT.OS_Lib.OS_Exit (1);
          end if;
       end;
 

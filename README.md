@@ -1,9 +1,7 @@
 # qoi-ada
-“Quite OK Image” Ada implementation
+“Quite OK Image” Ada/SPARK implementation
 
-This is based on [QOI](https://github.com/phoboslab/qoi) commit
-`fda5167d76d05de67b821c787824c8d177fd22d8`. The QOI specification is likely to
-change soon so it might become incompatible...
+This is based on [QOI](https://qoiformat.org/) format specification V1.
 
 To call the `Encode`/`Decode` procedure you have to provide a large enough
 output buffer. If the provided output buffer is not large enough, each
