@@ -120,7 +120,7 @@ is
          if Desc.Channels = 4 then
             Result.A := Pix (Buffer_Index + 3);
          else
-            Result.A := 0;
+            Result.A := 255;
          end if;
          return Result;
       end Read;
@@ -155,6 +155,7 @@ is
               QOI_HEADER_SIZE
               + (Desc.Channels + 1) * (Storage_Count (Px_Index) - Storage_Count (Run)));
          pragma Loop_Invariant (Output (Output'First .. P - 1)'Initialized);
+         pragma Loop_Invariant (if Desc.Channels /= 4 then Px_Prev.A = 255);
 
          Px := Read (Px_Index);
 
