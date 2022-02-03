@@ -1,3 +1,6 @@
 [submodule "tests/reference-qoi"]
 	path = tests/reference-qoi
 	url = https://github.com/phoboslab/qoi
+[submodule "tests/stb"]
+	path = tests/stb
+	url = https://github.com/nothings/stb
