@@ -4,23 +4,22 @@ package body QOI
 with SPARK_Mode
 is
 
-   pragma Compile_Time_Error (Storage_Element'Size /= 8,
-                              "Invalid element size");
+   pragma Compile_Time_Error
+     (Storage_Element'Size /= 8, "Invalid element size");
 
    pragma Warnings (Off, "lower bound test optimized away");
 
    subtype SE is Storage_Element;
 
-   function As_Index is new Ada.Unchecked_Conversion (SE, Index_Tag);
-   function As_Diff is new Ada.Unchecked_Conversion (SE, Diff_Tag);
+   function As_Index  is new Ada.Unchecked_Conversion (SE, Index_Tag);
+   function As_Diff   is new Ada.Unchecked_Conversion (SE, Diff_Tag);
    function As_LUMA_A is new Ada.Unchecked_Conversion (SE, LUMA_Tag_A);
    function As_LUMA_B is new Ada.Unchecked_Conversion (SE, LUMA_Tag_B);
-   function As_Run is new Ada.Unchecked_Conversion (SE, Run_Tag);
+   function As_Run    is new Ada.Unchecked_Conversion (SE, Run_Tag);
 
    type Color is record
       R, G, B, A : SE;
-   end record
-     with Size => 32;
+   end record;
 
    type Index_Range is range 0 .. 63;
    subtype Run_Range is Unsigned_32 range 0 .. 62;
@@ -76,6 +75,10 @@ is
         Post =>
           P = P'Old + 1 and then Output (Output'First .. P - 1)'Initialized;
 
+      ----------
+      -- Push --
+      ----------
+
       procedure Push (D : Unsigned_32) is
       begin
          Output (P)     := SE (Shift_Right (D and 16#FF_00_00_00#, 24));
@@ -86,6 +89,10 @@ is
          P := P + 4;
       end Push;
 
+      ----------------
+      -- Gen_Push_8 --
+      ----------------
+
       procedure Gen_Push_8  (D : T) is
          function To_Byte is new Ada.Unchecked_Conversion (T, SE);
       begin
@@ -94,21 +101,24 @@ is
          P := P + 1;
       end Gen_Push_8;
 
-      procedure Push is new Gen_Push_8 (SE);
-      procedure Push_Run is new Gen_Push_8 (Run_Tag);
-      procedure Push_Index is new Gen_Push_8 (Index_Tag);
-      procedure Push_Diff is new Gen_Push_8 (Diff_Tag);
+      procedure Push        is new Gen_Push_8 (SE);
+      procedure Push_Run    is new Gen_Push_8 (Run_Tag);
+      procedure Push_Index  is new Gen_Push_8 (Index_Tag);
+      procedure Push_Diff   is new Gen_Push_8 (Diff_Tag);
       procedure Push_Luma_A is new Gen_Push_8 (LUMA_Tag_A);
       procedure Push_Luma_B is new Gen_Push_8 (LUMA_Tag_B);
 
       Number_Of_Pixels : constant Storage_Count := Desc.Width * Desc.Height;
 
-      subtype Pixel_Index_Range
-        is Storage_Count range 0 .. Number_Of_Pixels - 1;
+      subtype Pixel_Index is Storage_Count range 0 .. Number_Of_Pixels - 1;
 
-      function Read (Index : Pixel_Index_Range) return Color;
+      function Read (Index : Pixel_Index) return Color;
 
-      function Read (Index : Pixel_Index_Range) return Color is
+      ----------
+      -- Read --
+      ----------
+
+      function Read (Index : Pixel_Index) return Color is
          Result : Color;
          Offset : constant Storage_Count := Index * Desc.Channels;
          Buffer_Index : constant Storage_Count := Pix'First + Offset;
@@ -144,7 +154,7 @@ is
       pragma Assert (P = Output'First + QOI_HEADER_SIZE);
       pragma Assert (Run = 0);
       pragma Assert (Output (Output'First .. P - 1)'Initialized);
-      for Px_Index in Pixel_Index_Range loop
+      for Px_Index in Pixel_Index loop
 
          pragma Loop_Invariant
            (Run in 0 .. Run_Range'Last - 1);
@@ -153,7 +163,8 @@ is
               0
                 ..
               QOI_HEADER_SIZE
-              + (Desc.Channels + 1) * (Storage_Count (Px_Index) - Storage_Count (Run)));
+            + (Desc.Channels + 1) *
+            (Storage_Count (Px_Index) - Storage_Count (Run)));
          pragma Loop_Invariant (Output (Output'First .. P - 1)'Initialized);
          pragma Loop_Invariant (if Desc.Channels /= 4 then Px_Prev.A = 255);
 
@@ -162,7 +173,7 @@ is
          if Px = Px_Prev then
             Run := Run + 1;
 
-            if Run = Run_Range'Last or else Px_Index = Pixel_Index_Range'Last
+            if Run = Run_Range'Last or else Px_Index = Pixel_Index'Last
             then
                Push_Run ((Op => QOI_OP_RUN, Run => Uint6 (Run - 1)));
                Run := 0;
@@ -176,11 +187,9 @@ is
             end if;
 
             pragma Assert (Run = 0);
-            pragma Assert
-              (P - Output'First in
-                 0 .. QOI_HEADER_SIZE
-                      + (Desc.Channels + 1)
-                          * Storage_Count (Px_Index));
+            pragma Assert (P - Output'First in
+                             0 .. QOI_HEADER_SIZE + (Desc.Channels + 1) *
+                             Storage_Count (Px_Index));
 
             declare
                Index_Pos : constant Index_Range :=
@@ -248,11 +257,12 @@ is
       pragma Assert (P - Output'First in
         0 .. QOI_HEADER_SIZE + (Desc.Channels + 1) * Number_Of_Pixels);
 
-      for Count in QOI_PADDING'Range loop
+      for Index in QOI_PADDING'Range loop
          pragma Loop_Invariant
-           (P - Output'First in 0 .. Encode_Worst_Case (Desc) - QOI_PADDING'Length + Count - 1);
+           (P - Output'First in
+              0 .. Encode_Worst_Case (Desc) - QOI_PADDING'Length + Index - 1);
          pragma Loop_Invariant (Output (Output'First .. P - 1)'Initialized);
-         Push (QOI_PADDING (Count));
+         Push (QOI_PADDING (Index));
       end loop;
 
       pragma Assert (Output (Output'First .. P - 1)'Initialized);
@@ -292,7 +302,7 @@ is
       end Pop32;
 
       Magic   : Unsigned_32;
-      Temp_32 : unsigned_32;
+      Temp_32 : Unsigned_32;
       Temp_8  : SE;
    begin
       if Data'Length < QOI_HEADER_SIZE then
@@ -383,11 +393,11 @@ is
       end if;
 
       P := Data'First + QOI_HEADER_SIZE;
+
       declare
          Number_Of_Pixels : constant Storage_Count := Desc.Width * Desc.Height;
 
-         subtype Pixel_Index_Range
-           is Storage_Count range 0 .. Number_Of_Pixels - 1;
+         subtype Pixel_Index is Storage_Count range 0 .. Number_Of_Pixels - 1;
 
          Last_Chunk : constant Storage_Count := Data'Last - QOI_PADDING'Length;
 
@@ -397,13 +407,14 @@ is
          VG      : SE;
          Run : Run_Range := 0;
       begin
-         for Px_Index in Pixel_Index_Range loop
+         for Px_Index in Pixel_Index loop
 
             pragma Loop_Invariant (P >= Data'First);
             pragma Loop_Invariant
               (Out_Index
-               = Output'First + Desc.Channels * (Px_Index - Pixel_Index_Range'First));
-            pragma Loop_Invariant (Output (Output'First .. Out_Index - 1)'Initialized);
+               = Output'First + Desc.Channels * (Px_Index - Pixel_Index'First));
+            pragma Loop_Invariant
+              (Output (Output'First .. Out_Index - 1)'Initialized);
 
             if Run > 0 then
                Run := Run - 1;
@@ -436,9 +447,9 @@ is
                      Pop (B2);
                      VG := SE (As_LUMA_A (B1).DG) - 32;
 
-                     PX.R := PX.R + VG + SE (As_LUMA_B (B2).DG_R) - 8;
-                     PX.G := PX.G + VG;
-                     PX.B := PX.B + VG + SE (As_LUMA_B (B2).DG_B) - 8;
+                     Px.R := Px.R + VG + SE (As_LUMA_B (B2).DG_R) - 8;
+                     Px.G := Px.G + VG;
+                     Px.B := Px.B + VG + SE (As_LUMA_B (B2).DG_B) - 8;
 
                   when QOI_OP_RUN =>
                      Run := Run_Range (As_Run (B1).Run mod 63);
