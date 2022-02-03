@@ -5,3 +5,6 @@ version = "0.0.0"
 authors = ["Fabien Chouteau"]
 maintainers = ["Fabien Chouteau <fabien.chouteau@gmail.com>"]
 maintainers-logins = ["Fabien-Chouteau"]
+
+[[depends-on]]
+gnat = ">=11.2"
