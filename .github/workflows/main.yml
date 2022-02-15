@@ -26,6 +26,7 @@ jobs:
           toolchain: gprbuild gnat_native --disable-assistant
       - run: alr build
       - run: cd tests && alr build && ./bin/tests test.png encode.qoi && ./bin/tests encode.qoi decode.png
+      - run: cd tests && bash compare_refs.sh
 
       - uses: ada-actions/toolchain@ce2020
         if: matrix.os == 'ubuntu-latest'
