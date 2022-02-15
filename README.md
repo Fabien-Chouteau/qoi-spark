@@ -1,4 +1,4 @@
-# qoi-ada
+# qoi-spark
 “Quite OK Image” Ada/SPARK implementation
 
 This is based on [QOI](https://qoiformat.org/) format specification V1.
