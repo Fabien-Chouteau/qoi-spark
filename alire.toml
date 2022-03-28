@@ -11,3 +11,5 @@ tags = ["image", "encoding", "qoi"]
 
 [[depends-on]]
 gnat = ">=11.2"
+[[depends-on]]  # Added by alr
+gnatprove = "^11.2.3"  # Added by alr

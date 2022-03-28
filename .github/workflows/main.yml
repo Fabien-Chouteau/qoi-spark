@@ -10,43 +10,42 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, ubuntu-latest] #unknown issue on macos-latest...
+        os: [windows-latest, ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     env:
-      QOI_COMPILE_CHECKS: enabled
-      QOI_RUNTIME_CHECKS: enabled
-      QOI_STYLE_CHECKS: enabled
-      QOI_CONTRACTS: enabled
+      QOI_COMPILE_CHECKS: disabled
+      QOI_RUNTIME_CHECKS: disabled
+      QOI_STYLE_CHECKS: disabled
+      QOI_CONTRACTS: disabled
     steps:
       - uses: actions/checkout@v2
         with:
           submodules: true
       - uses: alire-project/setup-alire@v1
-        with:
-          toolchain: gprbuild gnat_native --disable-assistant
       - run: alr build
+      - run: eval `alr printenv` && gnatprove -P qoi.gpr --level=4 -j0 --checks-as-errors -cargs -gnatef
       - run: cd tests && alr build && ./bin/tests test.png encode.qoi && ./bin/tests encode.qoi decode.png
       - run: cd tests && bash compare_refs.sh
 
-      - uses: ada-actions/toolchain@ce2020
-        if: matrix.os == 'ubuntu-latest'
-        with:
-          distrib: community
-      - uses: reviewdog/action-setup@v1
-        if: matrix.os == 'ubuntu-latest'
-      - name: SPARK proof
-        if: matrix.os == 'ubuntu-latest'
-        env:
-          REVIEWDOG_GITHUB_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        shell: bash
-        run: |
-          status=0
-          gnatprove -Pqoi.gpr -j0 --level=4 --checks-as-errors -cargs -gnatef > output.txt 2>&1 || status=$?
-          cat output.txt
-          cat output.txt | reviewdog -efm="%f:%l:%c: %m" -diff="git diff master" --reporter=github-pr-review
-          # Check for errors
-          if [ $status -ne 0 ]; then
-             echo "ERROR: gnatprove returned $status"
-             # This will cause the workflow to exit with $status
-             bash -c "exit $status"
-          fi
+      # - uses: ada-actions/toolchain@ce2020
+      #   if: matrix.os == 'ubuntu-latest'
+      #   with:
+      #     distrib: community
+      # - uses: reviewdog/action-setup@v1
+      #   if: matrix.os == 'ubuntu-latest'
+      # - name: SPARK proof
+      #   if: matrix.os == 'ubuntu-latest'
+      #   env:
+      #     REVIEWDOG_GITHUB_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      #   shell: bash
+      #   run: |
+      #     status=0
+      #     gnatprove -Pqoi.gpr -j0 --level=4 --checks-as-errors -cargs -gnatef > output.txt 2>&1 || status=$?
+      #     cat output.txt
+      #     cat output.txt | reviewdog -efm="%f:%l:%c: %m" -diff="git diff master" --reporter=github-pr-review
+      #     # Check for errors
+      #     if [ $status -ne 0 ]; then
+      #        echo "ERROR: gnatprove returned $status"
+      #        # This will cause the workflow to exit with $status
+      #        bash -c "exit $status"
+      #     fi
